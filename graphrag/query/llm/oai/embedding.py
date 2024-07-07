@@ -5,6 +5,7 @@
 
 import asyncio
 from collections.abc import Callable
+from pprint import pprint
 from typing import Any
 
 import numpy as np
@@ -80,9 +81,16 @@ class OpenAIEmbedding(BaseTextEmbedding, OpenAILLMImpl):
         )
         chunk_embeddings = []
         chunk_lens = []
+        
+        token_encoder = self.token_encoder
+        if token_encoder is None:
+            token_encoder = tiktoken.get_encoding("cl100k_base")
         for chunk in token_chunks:
+            #pprint(chunk)
+            decoded = token_encoder.decode(chunk)
+            #pprint(decoded)
             try:
-                embedding, chunk_len = self._embed_with_retry(chunk, **kwargs)
+                embedding, chunk_len = self._embed_with_retry(decoded, **kwargs)
                 chunk_embeddings.append(embedding)
                 chunk_lens.append(chunk_len)
             # TODO: catch a more specific exception
