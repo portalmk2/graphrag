@@ -4,6 +4,7 @@
 """A module containing the summarize_descriptions verb."""
 
 import asyncio
+import json
 import logging
 from enum import Enum
 from typing import Any, NamedTuple, cast
@@ -124,11 +125,22 @@ async def summarize_descriptions(
         ticker_length = len(graph.nodes) + len(graph.edges)
 
         ticker = progress_ticker(callbacks.progress, ticker_length)
+        
+        def try_parse_string(s):
+            try:
+                return json.loads(s)
+            except json.JSONDecodeError:
+                return s
+        
+        def remove_quote(items: list[str] | str):
+            if type(items) is str:
+                return try_parse_string(items)
+            return [try_parse_string(s) for s in items]
 
         futures = [
             do_summarize_descriptions(
-                node,
-                sorted(set(graph.nodes[node].get("description", "").split("\n"))),
+                remove_quote(node),
+                sorted(set(remove_quote(graph.nodes[node].get("description", "").split("\n")))),
                 ticker,
                 semaphore,
             )
@@ -136,8 +148,8 @@ async def summarize_descriptions(
         ]
         futures += [
             do_summarize_descriptions(
-                edge,
-                sorted(set(graph.edges[edge].get("description", "").split("\n"))),
+                remove_quote(edge),
+                sorted(set(remove_quote(graph.edges[edge].get("description", "").split("\n")))),
                 ticker,
                 semaphore,
             )
