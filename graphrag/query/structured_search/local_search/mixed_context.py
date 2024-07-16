@@ -392,6 +392,13 @@ class LocalSearchMixedContext(LocalContextBuilder):
         column_delimiter: str = "|",
     ) -> tuple[str, dict[str, pd.DataFrame]]:
         """Build data context for local search prompt combining entity/relationship/covariate tables."""
+        
+        def log_print(s):
+            print(s)
+                
+        log_print("build_local_context")
+        total_budget = max_tokens
+        
         # build entity context
         entity_context, entity_context_data = build_entity_context(
             selected_entities=selected_entities,
@@ -403,6 +410,9 @@ class LocalSearchMixedContext(LocalContextBuilder):
             context_name="Entities",
         )
         entity_tokens = num_tokens(entity_context, self.token_encoder)
+        
+        log_print(f"> entity_tokens: {total_budget}-{entity_tokens} => {total_budget-entity_tokens}")
+        total_budget -= entity_tokens
 
         # build relationship-covariate context
         added_entities = []
@@ -414,6 +424,10 @@ class LocalSearchMixedContext(LocalContextBuilder):
             current_context = []
             current_context_data = {}
             added_entities.append(entity)
+            
+            log_print(f"  entity: {entity.title}")
+            entity_budget = total_budget
+            log_print(f"    budget: {entity_budget}")
 
             # build relationship context
             (
@@ -432,34 +446,48 @@ class LocalSearchMixedContext(LocalContextBuilder):
             )
             current_context.append(relationship_context)
             current_context_data["relationships"] = relationship_context_data
-            total_tokens = entity_tokens + num_tokens(
-                relationship_context, self.token_encoder
-            )
-
+            
+            relation_tokens = num_tokens(relationship_context, self.token_encoder)
+            log_print(f"  > relation_tokens: {entity_budget}-{relation_tokens} => {entity_budget-relation_tokens}")
+            entity_budget -= relation_tokens
+            
+            
             # build covariate context
+            covariate_tokens = 0
             for covariate in self.covariates:
+                covariate_budget = entity_budget - covariate_tokens
                 covariate_context, covariate_context_data = build_covariates_context(
                     selected_entities=added_entities,
                     covariates=self.covariates[covariate],
                     token_encoder=self.token_encoder,
-                    max_tokens=max_tokens,
+                    max_tokens=covariate_budget,
                     column_delimiter=column_delimiter,
                     context_name=covariate,
-                )
-                total_tokens += num_tokens(covariate_context, self.token_encoder)
+                )                
+                cov_item_tokens = num_tokens(covariate_context, self.token_encoder)
+                covariate_tokens += cov_item_tokens
+                log_print(f'    > {covariate} tokens: {covariate_budget}-{cov_item_tokens} => {covariate_budget-cov_item_tokens}')
+                covariate_budget -= cov_item_tokens
+                
                 current_context.append(covariate_context)
                 current_context_data[covariate.lower()] = covariate_context_data
 
-            if total_tokens > max_tokens:
-                log.info("Reached token limit - reverting to previous context state")
+            log_print(f"  > covariate_tokens: {entity_budget}-{covariate_tokens} => {entity_budget-covariate_tokens}")
+            entity_budget -= covariate_tokens
+            
+            if entity_budget < 0:
+                log.info(f"Reached token limit - reverting to previous context state")
                 break
-
-            final_context = current_context
+            
+            total_budget = entity_budget
+            final_context= current_context
             final_context_data = current_context_data
 
         # attach entity context to final context
         final_context_text = entity_context + "\n\n" + "\n\n".join(final_context)
         final_context_data["entities"] = entity_context_data
+        
+        log_print(f"final_tokens: {num_tokens(final_context_text, self.token_encoder)}")
 
         if return_candidate_context:
             # we return all the candidate entities/relationships/covariates (not only those that were fitted into the context window)
